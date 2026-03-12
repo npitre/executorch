@@ -15,7 +15,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
-from executorch.backends.arm.common.pipeline_config import ArmPassPipelineConfig
+from executorch.backends.arm.common.pipeline_config import (
+    ArmPassPipelineConfig,
+    SoftmaxDecompositionConfig,
+)
 from executorch.backends.arm.tosa import TosaSpecification
 
 from executorch.exir.backend.compile_spec_schema import CompileSpec
@@ -235,7 +238,10 @@ class ArmCompileSpec(ABC):
     def _create_default_pipeline_config(self) -> ArmPassPipelineConfig:
         config = ArmPassPipelineConfig()
         if self.tosa_spec.is_U55_subset:
-            config.disable_masked_softmax()
+            # Keep U55 on STABLE instead of the generic MASKED default:
+            # MASKED also enables masked_fill decomposition, which lowers to
+            # where/full_like and is not a good default fit for U55.
+            config.softmax = SoftmaxDecompositionConfig.STABLE
         return config
 
     def get_intermediate_path(self) -> str | None:
