@@ -61,6 +61,9 @@ if(CONFIG_EXECUTORCH)
     set(EXECUTORCH_BUILD_ARM_BAREMETAL ON)
   endif()
 
+  # libdl is not available on Zephyr (no dladdr/dlopen)
+  set(EXECUTORCH_USE_DL OFF)
+
   set(EXECUTORCH_BUILD_EXTENSION_RUNNER_UTIL ON)
   set(EXECUTORCH_BUILD_KERNELS_QUANTIZED ON)
   # Zephyr builds use -fno-rtti; AOT quantized kernels pull in Torch headers
