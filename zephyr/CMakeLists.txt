@@ -8,6 +8,7 @@
 if(CONFIG_EXECUTORCH)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+  set(CMAKE_SKIP_INSTALL_RULES ON)
 
   set(EXECUTORCH_DIR ${ZEPHYR_CURRENT_MODULE_DIR})
   message(STATUS "EXECUTORCH_DIR set to: ${EXECUTORCH_DIR}")
@@ -147,12 +148,23 @@ if(CONFIG_EXECUTORCH)
     endif()
   endforeach()
 
+  # Suppress warnings in third-party code that conflict with Zephyr's -Werror
+  if(TARGET flatccrt)
+    target_compile_options(flatccrt PRIVATE
+      -Wno-unterminated-string-initialization)
+  endif()
+
   if(TARGET zephyr_interface)
     target_link_libraries(executorch_core PUBLIC zephyr_interface)
   endif()
 
-  # Create a single Zephyr library that includes ExecuTorch integration and PAL
+  # Create a single Zephyr library that includes ExecuTorch integration and PAL.
+  # Use zephyr_include_directories() to make ExecuTorch headers available to
+  # all Zephyr application code.
+  zephyr_include_directories(${EXECUTORCH_PARENT_DIR})
+  zephyr_include_directories(${EXECUTORCH_DIR}/third-party/flatcc/include)
   zephyr_library_named(libexecutorch)
+  zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/executorch_zephyr.c)
 
   # Link ExecuTorch libraries
   target_link_libraries(libexecutorch PUBLIC executorch_core)
@@ -171,7 +183,6 @@ if(CONFIG_EXECUTORCH)
 
   target_include_directories(
     libexecutorch PUBLIC ${EXECUTORCH_DIR}/runtime
-                         ${EXECUTORCH_DIR}/third-party/flatcc/include
   )
 
 endif()
