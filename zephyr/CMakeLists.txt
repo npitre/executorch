@@ -153,6 +153,8 @@ if(CONFIG_EXECUTORCH)
       optimized_kernels
       cortex_m_ops_lib
       cortex_m_kernels
+      cortex_m_qdq_ops_lib
+      cortex_m_qdq_kernels
       cmsis-nn
       xnnpack_backend
       XNNPACK
