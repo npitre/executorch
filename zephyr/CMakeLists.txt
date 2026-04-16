@@ -34,6 +34,10 @@ if(CONFIG_EXECUTORCH)
   get_filename_component(EXECUTORCH_PARENT_DIR ${EXECUTORCH_DIR} DIRECTORY)
   include_directories(${EXECUTORCH_PARENT_DIR})
 
+  # Provide a <mutex> shim for baremetal C++ (wraps pthread_mutex_t).
+  # Must come before add_subdirectory so all ExecuTorch targets find it.
+  include_directories(BEFORE SYSTEM ${CMAKE_CURRENT_LIST_DIR}/include)
+
   # Note: We don't create executorch_pal as a separate library to avoid circular
   # dependencies with Zephyr's build system. Instead, we'll add the PAL source
   # directly to our final library.
@@ -55,8 +59,10 @@ if(CONFIG_EXECUTORCH)
   if(CONFIG_CPU_CORTEX_M)
     set(EXECUTORCH_BUILD_CORTEX_M ON)
   endif()
-  if(CONFIG_CPU_CORTEX_A)
+  if(CONFIG_EXECUTORCH_BUILD_XNNPACK)
     set(EXECUTORCH_BUILD_XNNPACK ON)
+    set(EXECUTORCH_BUILD_CPUINFO ON)
+    set(EXECUTORCH_BUILD_PTHREADPOOL ON)
   endif()
   if(CONFIG_ETHOS_U)
     set(EXECUTORCH_BUILD_ARM_BAREMETAL ON)
@@ -64,6 +70,17 @@ if(CONFIG_EXECUTORCH)
 
   # libdl is not available on Zephyr (no dladdr/dlopen)
   set(EXECUTORCH_USE_DL OFF)
+
+  if(CONFIG_EXECUTORCH_BUILD_XNNPACK)
+    # Use all logical cores for threadpool sizing.  The "performance cores"
+    # path reads /sys/ files that don't exist on Zephyr.
+    set(EXECUTORCH_THREADPOOL_USE_ALL_LOGICAL_CORES ON)
+
+    # Zephyr/picolibc provides math functions — no separate libm needed.
+    # XNNPACK's find_library(m) finds the host libm.so which can't be
+    # statically linked into the cross-compiled binary.
+    set(XNNPACK_BUILD_WITH_LIBM OFF CACHE BOOL "" FORCE)
+  endif()
 
   set(EXECUTORCH_BUILD_EXTENSION_RUNNER_UTIL ON)
   set(EXECUTORCH_BUILD_KERNELS_QUANTIZED ON)
@@ -137,6 +154,10 @@ if(CONFIG_EXECUTORCH)
       cortex_m_ops_lib
       cortex_m_kernels
       cmsis-nn
+      xnnpack_backend
+      XNNPACK
+      cpuinfo
+      pthreadpool
   )
 
   # Apply corrected flags to each target
@@ -156,6 +177,34 @@ if(CONFIG_EXECUTORCH)
 
   if(TARGET zephyr_interface)
     target_link_libraries(executorch_core PUBLIC zephyr_interface)
+    # XNNPACK dependencies need Zephyr's include paths for POSIX headers
+    # (pthread.h, etc.) and the autoconf.h with CONFIG_* defines.
+    foreach(_xnn_dep pthreadpool cpuinfo cpuinfo_internals XNNPACK)
+      if(TARGET ${_xnn_dep})
+        target_link_libraries(${_xnn_dep} PUBLIC zephyr_interface)
+        # Ensure Zephyr's generated headers exist before compilation
+        add_dependencies(${_xnn_dep} zephyr_generated_headers)
+      endif()
+    endforeach()
+    # pthreadpool uses cpuinfo for core count detection when available,
+    # avoiding the need for sysconf(_SC_NPROCESSORS_ONLN).
+    if(TARGET pthreadpool)
+      target_compile_definitions(pthreadpool PRIVATE PTHREADPOOL_USE_CPUINFO=1)
+      target_link_libraries(pthreadpool PRIVATE cpuinfo)
+    endif()
+    # Zephyr has no mmap/mprotect — disable JIT memory management in XNNPACK.
+    if(TARGET xnnpack-base)
+      target_compile_definitions(xnnpack-base INTERFACE XNN_HAS_MMAP=0)
+    endif()
+    # XNNWeightsCache.cpp uses try/catch for std::bad_alloc recovery.
+    # Enabling -fexceptions on Zephyr pulls in the libstdc++ unwinding
+    # runtime which needs POSIX file I/O syscalls not available on
+    # baremetal.  Define __ZEPHYR_NO_EXCEPTIONS to let the source skip
+    # the try/catch block (patched in XNNWeightsCache.cpp).
+    if(TARGET xnnpack_backend)
+      target_compile_definitions(xnnpack_backend PRIVATE
+        __ZEPHYR_NO_EXCEPTIONS__)
+    endif()
   endif()
 
   # Create a single Zephyr library that includes ExecuTorch integration and PAL.
@@ -165,6 +214,9 @@ if(CONFIG_EXECUTORCH)
   zephyr_include_directories(${EXECUTORCH_DIR}/third-party/flatcc/include)
   zephyr_library_named(libexecutorch)
   zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/executorch_zephyr.c)
+  if(CONFIG_EXECUTORCH_BUILD_XNNPACK)
+    zephyr_library_sources(${CMAKE_CURRENT_LIST_DIR}/posix_stubs.c)
+  endif()
 
   # Link ExecuTorch libraries
   target_link_libraries(libexecutorch PUBLIC executorch_core)
