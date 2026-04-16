@@ -49,4 +49,16 @@ config EXECUTORCH_BUILD_PORTABLE_OPS
 	  operator building to include only needed operators, but the
 	  underlying kernel implementations will still be available.
 
+config EXECUTORCH_BUILD_XNNPACK
+	bool "Build XNNPACK CPU backend"
+	depends on CPU_CORTEX_A
+	select POSIX_SYSTEM_INTERFACES
+	select POSIX_THREADS
+	select POSIX_TIMERS
+	help
+	  Enable the XNNPACK CPU backend for optimized inference on
+	  Arm Cortex-A targets using NEON/SVE vector instructions.
+	  This also enables cpuinfo for hardware feature detection
+	  and pthreadpool for multi-threaded execution on SMP targets.
+
 endif # EXECUTORCH
