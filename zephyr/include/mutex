@@ -1,0 +1,111 @@
+/*
+ * Copyright (c) 2026 BayLibre SAS
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Minimal <mutex> implementation for Zephyr baremetal C++.
+ *
+ * The Zephyr SDK's baremetal libstdc++ does not include <mutex> because
+ * it requires OS threading support.  Since Zephyr provides POSIX threads,
+ * we can implement the subset used by ExecuTorch on top of pthread_mutex_t.
+ */
+
+#ifndef ZEPHYR_MUTEX_SHIM_H_
+#define ZEPHYR_MUTEX_SHIM_H_
+
+#include <pthread.h>
+
+namespace std {
+
+class mutex {
+public:
+  mutex() { pthread_mutex_init(&m_, nullptr); }
+  ~mutex() { pthread_mutex_destroy(&m_); }
+
+  mutex(const mutex&) = delete;
+  mutex& operator=(const mutex&) = delete;
+
+  void lock() { pthread_mutex_lock(&m_); }
+  void unlock() { pthread_mutex_unlock(&m_); }
+  bool try_lock() { return pthread_mutex_trylock(&m_) == 0; }
+
+private:
+  pthread_mutex_t m_;
+};
+
+template <typename Mutex>
+class lock_guard {
+public:
+  explicit lock_guard(Mutex& m) : m_(m) { m_.lock(); }
+  ~lock_guard() { m_.unlock(); }
+
+  lock_guard(const lock_guard&) = delete;
+  lock_guard& operator=(const lock_guard&) = delete;
+
+private:
+  Mutex& m_;
+};
+
+template <typename Mutex>
+class unique_lock {
+public:
+  unique_lock() : m_(nullptr), owns_(false) {}
+  explicit unique_lock(Mutex& m) : m_(&m), owns_(true) { m_->lock(); }
+  ~unique_lock() { if (owns_) m_->unlock(); }
+
+  unique_lock(const unique_lock&) = delete;
+  unique_lock& operator=(const unique_lock&) = delete;
+  unique_lock(unique_lock&& o) : m_(o.m_), owns_(o.owns_) { o.owns_ = false; }
+
+  void lock() { m_->lock(); owns_ = true; }
+  void unlock() { m_->unlock(); owns_ = false; }
+  Mutex* mutex() const { return m_; }
+  bool owns_lock() const { return owns_; }
+
+private:
+  Mutex* m_;
+  bool owns_;
+};
+
+template <typename... Mutexes>
+class scoped_lock;
+
+template <typename Mutex>
+class scoped_lock<Mutex> {
+public:
+  explicit scoped_lock(Mutex& m) : m_(m) { m_.lock(); }
+  ~scoped_lock() { m_.unlock(); }
+
+  scoped_lock(const scoped_lock&) = delete;
+  scoped_lock& operator=(const scoped_lock&) = delete;
+
+private:
+  Mutex& m_;
+};
+
+class once_flag {
+public:
+  constexpr once_flag() : called_(false) {}
+
+  once_flag(const once_flag&) = delete;
+  once_flag& operator=(const once_flag&) = delete;
+
+private:
+  template <typename Callable, typename... Args>
+  friend void call_once(once_flag& flag, Callable&& f, Args&&... args);
+
+  bool called_;
+  mutex mtx_;
+};
+
+template <typename Callable, typename... Args>
+void call_once(once_flag& flag, Callable&& f, Args&&... args) {
+  lock_guard<mutex> lock(flag.mtx_);
+  if (!flag.called_) {
+    f(static_cast<Args&&>(args)...);
+    flag.called_ = true;
+  }
+}
+
+} // namespace std
+
+#endif // ZEPHYR_MUTEX_SHIM_H_
