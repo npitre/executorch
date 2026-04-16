@@ -433,7 +433,12 @@ void* XNNWeightsCache::reserve_space(XNNWeightsCache* context, size_t n) {
 }
 
 void* XNNWeightsCache::reserve_space_heap(size_t n) {
+  // Allocation with alignment.  On platforms with C++ exceptions, catch
+  // std::bad_alloc so XNNPACK can gracefully handle OOM.  On baremetal
+  // (Zephyr), exceptions are unavailable; allocation failure terminates.
+#if !defined(__ZEPHYR_NO_EXCEPTIONS__) && __cpp_exceptions
   try {
+#endif
     std::string data_container;
     size_t raw_allocation_size = n + kPackedAllocationAlignment - 1;
     data_container.resize(raw_allocation_size);
@@ -449,6 +454,7 @@ void* XNNWeightsCache::reserve_space_heap(size_t n) {
 
     packed_pointer_to_container_[aligned_space] = std::move(data_container);
     return aligned_space;
+#if !defined(__ZEPHYR_NO_EXCEPTIONS__) && __cpp_exceptions
   } catch (std::bad_alloc& e) {
     ET_LOG(
         Error,
@@ -457,6 +463,7 @@ void* XNNWeightsCache::reserve_space_heap(size_t n) {
         e.what());
     return nullptr;
   }
+#endif
 }
 
 size_t XNNWeightsCache::look_up_or_insert(
