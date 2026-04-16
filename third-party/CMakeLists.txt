@@ -98,6 +98,7 @@ ExternalProject_Add(
              -DCMAKE_TOOLCHAIN_FILE=
              $<$<AND:$<BOOL:${APPLE}>,$<BOOL:$<FILTER:${PLATFORM},EXCLUDE,^MAC>>>:-DCMAKE_OSX_SYSROOT=>
              -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}
+             "-DCMAKE_C_FLAGS=-Wno-unterminated-string-initialization"
              ${_flatcc_extra_cmake_args}
   BUILD_BYPRODUCTS <INSTALL_DIR>/bin/flatcc
   {_executorch_external_project_additional_args}

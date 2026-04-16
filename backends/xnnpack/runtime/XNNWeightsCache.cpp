@@ -169,7 +169,12 @@ void* XNNWeightsCache::reserve_space(XNNWeightsCache* context, size_t n) {
   // context->kPackedAllocationAlignment);
 
   // return reserved_pointer;
+  // Allocation with alignment.  On platforms with C++ exceptions, catch
+  // std::bad_alloc so XNNPACK can gracefully handle OOM.  On baremetal
+  // (Zephyr), exceptions are unavailable; allocation failure terminates.
+#if !defined(__ZEPHYR_NO_EXCEPTIONS__) && __cpp_exceptions
   try {
+#endif
     std::string data_container;
     size_t raw_allocation_size = n + context->kPackedAllocationAlignment - 1;
     data_container.resize(raw_allocation_size);
@@ -186,10 +191,8 @@ void* XNNWeightsCache::reserve_space(XNNWeightsCache* context, size_t n) {
     context->packed_pointer_to_container_[aligned_space] =
         std::move(data_container);
     return aligned_space;
+#if !defined(__ZEPHYR_NO_EXCEPTIONS__) && __cpp_exceptions
   } catch (std::bad_alloc& e) {
-    // XNNPACK can gracefully handle allocation failures, so return nullptr.
-    // We want to be able to recover from a failed attempt to load a large
-    // model without a crash.
     ET_LOG(
         Error,
         "XNN weight cache failed to allocate %zu bytes: %s.",
@@ -197,6 +200,7 @@ void* XNNWeightsCache::reserve_space(XNNWeightsCache* context, size_t n) {
         e.what());
     return nullptr;
   }
+#endif
 }
 
 size_t XNNWeightsCache::look_up_or_insert(
