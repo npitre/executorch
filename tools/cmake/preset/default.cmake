@@ -410,10 +410,15 @@ check_required_options_on(
   EXECUTORCH_BUILD_PTHREADPOOL
 )
 
-check_conflicting_options_on(
-  IF_ON EXECUTORCH_BUILD_ARM_BAREMETAL CONFLICTS_WITH
-  EXECUTORCH_BUILD_PTHREADPOOL EXECUTORCH_BUILD_CPUINFO
-)
+# Baremetal targets typically lack pthreads and /proc-based cpuinfo.
+# Zephyr is an exception: it provides POSIX thread wrappers and our
+# cpuinfo backend reads ARM ID registers directly.
+if(NOT DEFINED ZEPHYR_BASE)
+  check_conflicting_options_on(
+    IF_ON EXECUTORCH_BUILD_ARM_BAREMETAL CONFLICTS_WITH
+    EXECUTORCH_BUILD_PTHREADPOOL EXECUTORCH_BUILD_CPUINFO
+  )
+endif()
 
 # Selective build specifiers are mutually exclusive.
 check_conflicting_options_on(
