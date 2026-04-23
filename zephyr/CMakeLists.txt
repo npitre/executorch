@@ -188,6 +188,15 @@ if(CONFIG_EXECUTORCH)
         add_dependencies(${_xnn_dep} zephyr_generated_headers)
       endif()
     endforeach()
+    # Force-include a prelude that undefines Zephyr's global-namespace
+    # "clamp" macro, which collides with XNNPACK's file-local clamp()
+    # helper (see include/xnnpack_zephyr_prelude.h).  Applied via the
+    # xnnpack-base INTERFACE target which is linked by all XNNPACK
+    # component targets.
+    if(TARGET xnnpack-base)
+      target_compile_options(xnnpack-base INTERFACE
+        -include ${CMAKE_CURRENT_LIST_DIR}/include/xnnpack_zephyr_prelude.h)
+    endif()
     # pthreadpool uses cpuinfo for core count detection when available,
     # avoiding the need for sysconf(_SC_NPROCESSORS_ONLN).
     if(TARGET pthreadpool)
