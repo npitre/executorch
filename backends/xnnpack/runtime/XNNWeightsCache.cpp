@@ -9,7 +9,17 @@
 #include <executorch/backends/xnnpack/runtime/XNNWeightsCache.h>
 #include <executorch/runtime/core/error.h>
 #include <executorch/runtime/core/memory_allocator.h>
-#ifndef _WIN32
+/*
+ * The file-backed weights cache relies on POSIX file APIs (open/flock/
+ * ftruncate) plus mmap.  Windows lacks them, and so do bare-metal targets such
+ * as Zephyr, which have no filesystem to back the cache with in the first
+ * place.  Those builds use the heap path only.
+ */
+#if defined(_WIN32) || defined(__ZEPHYR__)
+#define ET_XNN_NO_FILE_BACKED_CACHE 1
+#endif
+
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/mman.h>
@@ -48,7 +58,7 @@ XNNWeightsCache::XNNWeightsCache() {
 }
 
 XNNWeightsCache::~XNNWeightsCache() {
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   for (auto& region : mmap_regions_) {
     if (region.addr != nullptr && region.addr != MAP_FAILED) {
       munmap(region.addr, region.size);
@@ -76,7 +86,7 @@ static T read_le(const uint8_t* src) {
   return value;
 }
 
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
 // Open the cache file and take an advisory exclusive lock. Returns the
 // fd, or -1 if open/flock failed (logs the failure). The caller decides
 // how to recover (typically: skip the mmap path for this init).
@@ -135,7 +145,7 @@ Error XNNWeightsCache::initialize_for_runtime(
   named_data_map_ = named_data_map;
   is_finalized_ = false;
 
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   if (packed_cache_path_.empty() || packed_file_fd_ >= 0) {
     return Error::Ok;
   }
@@ -212,7 +222,7 @@ Result<std::vector<std::string>> XNNWeightsCache::finalize_for_runtime() {
     }
   }
 
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   // Synchronous flush for newly added regions. MS_SYNC blocks until the
   // dirty pages are written to disk and marked clean
   if (mmap_regions_.size() > mmap_regions_synced_) {
@@ -258,7 +268,7 @@ Result<const uint8_t*> XNNWeightsCache::load_unpacked_data(
 
 void XNNWeightsCache::release_entry(void* packed_data_ptr) {
   packed_pointer_to_container_.erase(packed_data_ptr);
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   // Per-entry file-backed mmap region: munmap to release VM. The
   // packed_data_ptrs_ slot is nulled by the caller so existing offsets
   // stay valid.
@@ -276,7 +286,7 @@ void XNNWeightsCache::release_entry(void* packed_data_ptr) {
 }
 
 void XNNWeightsCache::full_unload() {
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   for (auto& region : mmap_regions_) {
     if (region.addr != nullptr && region.addr != MAP_FAILED) {
       munmap(region.addr, region.size);
@@ -376,7 +386,7 @@ size_t XNNWeightsCache::look_up(
 }
 
 void* XNNWeightsCache::reserve_space(XNNWeightsCache* context, size_t n) {
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   if (context->last_lookup_unnamed_ || context->loaded_from_disk_) {
     return context->reserve_space_heap(n);
   }
@@ -538,7 +548,7 @@ void XNNWeightsCache::set_packed_cache_path(const std::string& path) {
 }
 
 Error XNNWeightsCache::save_packed_index() {
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   if (packed_file_fd_ < 0) {
     return Error::Ok;
   }
@@ -638,7 +648,7 @@ Error XNNWeightsCache::save_packed_index() {
 }
 
 bool XNNWeightsCache::load_packed_cache() {
-#ifndef _WIN32
+#ifndef ET_XNN_NO_FILE_BACKED_CACHE
   int fd = open(packed_cache_path_.c_str(), O_RDONLY);
   if (fd < 0) {
     return false;
